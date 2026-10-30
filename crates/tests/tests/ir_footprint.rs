@@ -68,6 +68,26 @@ fn an_instruction_and_its_location_take_at_most_fifty_six_bytes() {
 }
 
 #[test]
+fn a_parsed_sequence_holds_no_spare_capacity() {
+    for with_dwarf in [false, true] {
+        let module = parse(with_dwarf, true);
+        let mut seqs = 0;
+        for_each_seq(&module, |seq| {
+            seqs += 1;
+            assert_eq!(
+                seq.instrs.capacity(),
+                seq.instrs.len(),
+                "a parsed sequence keeps the room its instructions take"
+            );
+        });
+        assert!(
+            seqs >= 5,
+            "the module's blocks, if arms and loop are walked"
+        );
+    }
+}
+
+#[test]
 fn a_v128_constant_keeps_its_bytes_through_parse_and_emit() {
     let expected = 1u128 | (2u128 << 64);
     let find = |module: &Module| {
