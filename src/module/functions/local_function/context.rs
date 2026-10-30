@@ -112,6 +112,9 @@ impl<'a> ValidationContext<'a> {
     pub fn pop_control(&mut self) -> Result<(ControlFrame, InstrSeqId)> {
         let frame = impl_pop_control(self.controls)?;
         let block = frame.block;
+        // The sequence is complete once its frame is popped: it keeps the
+        // room its instructions take and returns the growth slack.
+        self.func.block_mut(block).instrs.shrink_to_fit();
         Ok((frame, block))
     }
 
