@@ -1,8 +1,11 @@
 //! What the IR holds for each instruction it parses, and the DWARF
 //! bookkeeping it records only for a module whose DWARF it rewrites.
 
+use std::borrow::Cow;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use walrus::ir::{dfs_in_order, Instr, InstrSeq, Value, Visitor};
-use walrus::{InstrLocId, Module, ModuleConfig};
+use walrus::{CodeTransform, CustomSection, IdsToIndices, InstrLocId, Module, ModuleConfig};
 
 const WAT: &str = r#"
 (module
@@ -53,6 +56,42 @@ fn for_each_seq(module: &Module, mut f: impl FnMut(&InstrSeq)) {
     }
 }
 
+/// Counts the code transforms an emit hands it, and checks each is ordered by
+/// input offset with one entry per input offset.
+#[derive(Debug)]
+struct CountTransforms(Arc<AtomicUsize>);
+
+impl CustomSection for CountTransforms {
+    fn name(&self) -> &str {
+        "count-transforms"
+    }
+
+    fn data(&self, _: &IdsToIndices) -> Cow<'_, [u8]> {
+        vec![].into()
+    }
+
+    fn apply_code_transform(&mut self, transform: &CodeTransform) {
+        assert!(!transform.instruction_map.is_empty());
+        assert!(
+            transform
+                .instruction_map
+                .windows(2)
+                .all(|w| w[0].0 < w[1].0),
+            "the instruction map is ordered by input offset, one entry each: {:?}",
+            transform.instruction_map
+        );
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// How many code transforms one emit of `module` handed its custom sections.
+fn transforms_applied_by_emit(mut module: Module) -> usize {
+    let applied = Arc::new(AtomicUsize::new(0));
+    module.customs.add(CountTransforms(applied.clone()));
+    module.emit_wasm();
+    applied.load(Ordering::SeqCst)
+}
+
 #[test]
 fn an_instruction_and_its_location_take_at_most_fifty_six_bytes() {
     // Every parsed instruction is one `(Instr, InstrLocId)`, so this size is
@@ -85,6 +124,46 @@ fn a_parsed_sequence_holds_no_spare_capacity() {
             "the module's blocks, if arms and loop are walked"
         );
     }
+}
+
+#[test]
+fn generate_dwarf_records_nothing_for_a_module_without_dwarf() {
+    let module = parse(false, true);
+    for (_, func) in module.funcs.iter_local() {
+        assert!(func.instruction_mapping.is_empty());
+    }
+    assert_eq!(transforms_applied_by_emit(module), 0);
+}
+
+#[test]
+fn generate_dwarf_records_the_mapping_and_transform_for_a_module_with_dwarf() {
+    let module = parse(true, true);
+    for (_, func) in module.funcs.iter_local() {
+        let mapping = &func.instruction_mapping;
+        assert!(!mapping.is_empty());
+        assert!(
+            mapping.windows(2).all(|w| w[0].0 < w[1].0),
+            "the mapping is in offset order: {mapping:?}"
+        );
+    }
+    assert_eq!(transforms_applied_by_emit(module), 1);
+}
+
+#[test]
+fn a_module_with_dwarf_parsed_without_generate_dwarf_records_no_mapping() {
+    let module = parse(true, false);
+    for (_, func) in module.funcs.iter_local() {
+        assert!(func.instruction_mapping.is_empty());
+    }
+    assert_eq!(transforms_applied_by_emit(module), 0);
+}
+
+#[test]
+fn preserve_code_transform_records_the_transform_without_dwarf() {
+    let mut config = ModuleConfig::new();
+    config.preserve_code_transform(true);
+    let module = config.parse(&module_bytes(false)).unwrap();
+    assert_eq!(transforms_applied_by_emit(module), 1);
 }
 
 #[test]

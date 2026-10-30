@@ -81,6 +81,8 @@ pub struct Module {
     /// custom section.
     pub name: Option<String>,
     pub(crate) config: ModuleConfig,
+    /// Whether the parsed input carried any `.debug_*` section.
+    pub(crate) carries_dwarf: bool,
 }
 
 /// Code transformation records, which is used to transform DWARF debug entries.
@@ -299,6 +301,8 @@ impl Module {
             }
         }
 
+        ret.carries_dwarf = !debug_sections.is_empty();
+
         ret.parse_local_functions(
             local_functions,
             &mut indices,
@@ -443,6 +447,18 @@ impl Module {
         }
     }
 
+    /// Whether this module's DWARF is rewritten for the code it emits: the
+    /// config asks for DWARF and the input carried some.
+    pub(crate) fn rewrites_dwarf(&self) -> bool {
+        self.config.generate_dwarf && self.carries_dwarf
+    }
+
+    /// Whether an emit records the code transform: the config asks for it,
+    /// or the module's DWARF is rewritten through it.
+    pub(crate) fn records_code_transform(&self) -> bool {
+        self.config.preserve_code_transform || self.rewrites_dwarf()
+    }
+
     /// Emit this module into an in-memory wasm buffer.
     pub fn emit_wasm(&mut self) -> Vec<u8> {
         log::debug!("start emit");
@@ -501,7 +517,7 @@ impl Module {
 
             log::debug!("emitting custom section {}", section.name());
 
-            if self.config.preserve_code_transform {
+            if self.records_code_transform() {
                 section.apply_code_transform(&cx.code_transform);
             }
 
