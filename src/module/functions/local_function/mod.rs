@@ -406,10 +406,7 @@ fn append_instruction(ctx: &mut ValidationContext, inst: Operator, loc: InstrLoc
         Operator::I64Const { value } => const_(ctx, Value::I64(value)),
         Operator::F32Const { value } => const_(ctx, Value::F32(f32::from_bits(value.bits()))),
         Operator::F64Const { value } => const_(ctx, Value::F64(f64::from_bits(value.bits()))),
-        Operator::V128Const { value } => {
-            let val = crate::const_expr::v128_to_u128(&value);
-            const_(ctx, Value::V128(val))
-        }
+        Operator::V128Const { value } => const_(ctx, Value::V128(*value.bytes())),
         Operator::I32Eqz => unop(ctx, UnaryOp::I32Eqz),
         Operator::I32Eq => binop(ctx, BinaryOp::I32Eq),
         Operator::I32Ne => binop(ctx, BinaryOp::I32Ne),
@@ -1102,9 +1099,9 @@ fn append_instruction(ctx: &mut ValidationContext, inst: Operator, loc: InstrLoc
                 BrOnCast {
                     block,
                     from_nullable: from_ref_type.is_nullable(),
-                    from_heap_type,
+                    from_heap_type: Box::new(from_heap_type),
                     to_nullable: to_ref_type.is_nullable(),
-                    to_heap_type,
+                    to_heap_type: Box::new(to_heap_type),
                 },
                 loc,
             );
@@ -1124,9 +1121,9 @@ fn append_instruction(ctx: &mut ValidationContext, inst: Operator, loc: InstrLoc
                 BrOnCastFail {
                     block,
                     from_nullable: from_ref_type.is_nullable(),
-                    from_heap_type,
+                    from_heap_type: Box::new(from_heap_type),
                     to_nullable: to_ref_type.is_nullable(),
-                    to_heap_type,
+                    to_heap_type: Box::new(to_heap_type),
                 },
                 loc,
             );

@@ -148,7 +148,7 @@ impl ConstExpr {
                 ConstOp::I64Const(v) => return Ok(ConstExpr::Value(Value::I64(*v))),
                 ConstOp::F32Const(v) => return Ok(ConstExpr::Value(Value::F32(*v))),
                 ConstOp::F64Const(v) => return Ok(ConstExpr::Value(Value::F64(*v))),
-                ConstOp::V128Const(v) => return Ok(ConstExpr::Value(Value::V128(*v))),
+                ConstOp::V128Const(v) => return Ok(ConstExpr::Value(Value::V128(v.to_le_bytes()))),
                 ConstOp::GlobalGet(g) => return Ok(ConstExpr::Global(*g)),
                 ConstOp::RefNull(ty) => return Ok(ConstExpr::RefNull(*ty)),
                 ConstOp::RefFunc(f) => return Ok(ConstExpr::RefFunc(*f)),
@@ -167,7 +167,7 @@ impl ConstExpr {
                 Value::I64(v) => wasm_encoder::ConstExpr::i64_const(*v),
                 Value::F32(v) => wasm_encoder::ConstExpr::f32_const((*v).into()),
                 Value::F64(v) => wasm_encoder::ConstExpr::f64_const((*v).into()),
-                Value::V128(v) => wasm_encoder::ConstExpr::v128_const(*v as i128),
+                Value::V128(v) => wasm_encoder::ConstExpr::v128_const(i128::from_le_bytes(*v)),
             },
             ConstExpr::Global(g) => {
                 wasm_encoder::ConstExpr::global_get(cx.indices.get_global_index(*g))
