@@ -352,6 +352,7 @@ fn visit_fields(
         });
 
     fn extract_name_and_if_list(ty: &syn::Type) -> (&syn::Ident, bool) {
+        let ty_outer = ty;
         let path = match ty {
             syn::Type::Path(p) => &p.path,
             _ => panic!("field types must be paths"),
@@ -366,6 +367,11 @@ fn visit_fields(
             syn::GenericArgument::Type(ty) => ty,
             _ => panic!("invalid path in #[walrus_instr]"),
         };
+        // `Box<T>` holds one `T` and is visited as one: a field boxed to keep
+        // `Instr` small reaches the visitor through `Deref`.
+        if let Some(syn::Type::Path(inner)) = boxed_type(ty_outer) {
+            return (&inner.path.segments.last().unwrap().ident, false);
+        }
         if let syn::Type::Slice(t) = ty {
             ty = &t.elem;
         }
@@ -756,13 +762,23 @@ fn create_builder(variants: &[WalrusVariant]) -> impl quote::ToTokens {
         let method_name = syn::Ident::new(&method_name, Span::call_site());
 
         let mut args = Vec::new();
-        let mut arg_names = Vec::new();
+        let mut field_inits = Vec::new();
 
+        // A `Box<T>` field is taken as a `T` and boxed here, so a field boxed to
+        // keep `Instr` small leaves the builder's signature as it was.
         for field in variant.syn.fields.iter() {
             let name = field.ident.as_ref().expect("can't have unnamed fields");
-            arg_names.push(name);
-            let ty = &field.ty;
-            args.push(quote! { #name: #ty });
+            match boxed_type(&field.ty) {
+                Some(inner) => {
+                    args.push(quote! { #name: #inner });
+                    field_inits.push(quote! { #name: Box::new(#name) });
+                }
+                None => {
+                    let ty = &field.ty;
+                    args.push(quote! { #name: #ty });
+                    field_inits.push(quote! { #name });
+                }
+            }
         }
 
         let doc = format!(
@@ -776,20 +792,20 @@ fn create_builder(variants: &[WalrusVariant]) -> impl quote::ToTokens {
             name
         );
 
-        let arg_names = &arg_names;
+        let field_inits = &field_inits;
         let args = &args;
 
         builder_methods.push(quote! {
             #[inline]
             #[doc=#doc]
             pub fn #method_name(&mut self, #(#args),*) -> &mut Self {
-                self.instr(#name { #(#arg_names),* })
+                self.instr(#name { #(#field_inits),* })
             }
 
             #[inline]
             #[doc=#at_doc]
             pub fn #method_name_at(&mut self, position: usize, #(#args),*) -> &mut Self {
-                self.instr_at(position, #name { #(#arg_names),* })
+                self.instr_at(position, #name { #(#field_inits),* })
             }
         });
     }
@@ -798,5 +814,30 @@ fn create_builder(variants: &[WalrusVariant]) -> impl quote::ToTokens {
         impl crate::InstrSeqBuilder<'_> {
             #(#builder_methods)*
         }
+    }
+}
+
+/// The `T` of a field typed `Box<T>` where `T` is a plain path (not a slice).
+fn boxed_type(ty: &syn::Type) -> Option<&syn::Type> {
+    let path = match ty {
+        syn::Type::Path(p) => &p.path,
+        _ => return None,
+    };
+    let segment = path.segments.last()?;
+    if segment.ident != "Box" {
+        return None;
+    }
+    let args = match &segment.arguments {
+        syn::PathArguments::AngleBracketed(a) => &a.args,
+        _ => return None,
+    };
+    match args.first()? {
+        syn::GenericArgument::Type(inner @ syn::Type::Path(p)) => {
+            match p.path.segments.last()?.arguments {
+                syn::PathArguments::None => Some(inner),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }

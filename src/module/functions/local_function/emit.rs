@@ -311,7 +311,7 @@ impl<'instr> Visitor<'instr> for Emit<'_, 'instr> {
                 Value::I64(v) => Instruction::I64Const(*v),
                 Value::F32(v) => Instruction::F32Const((*v).into()),
                 Value::F64(v) => Instruction::F64Const((*v).into()),
-                Value::V128(v) => Instruction::V128Const(*v as i128),
+                Value::V128(v) => Instruction::V128Const(i128::from_le_bytes(*v)),
             },
 
             Drop(_) => Instruction::Drop,

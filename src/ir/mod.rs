@@ -639,13 +639,15 @@ pub enum Instr {
         /// Whether input type is nullable
         #[walrus(skip_visit)]
         from_nullable: bool,
-        /// Input heap type
-        from_heap_type: HeapType,
+        /// Input heap type, boxed so this rare instruction does not set the
+        /// size of every `Instr`
+        from_heap_type: Box<HeapType>,
         /// Whether target type is nullable
         #[walrus(skip_visit)]
         to_nullable: bool,
-        /// Target heap type
-        to_heap_type: HeapType,
+        /// Target heap type, boxed so this rare instruction does not set the
+        /// size of every `Instr`
+        to_heap_type: Box<HeapType>,
     },
 
     /// `br_on_cast_fail` - branch if cast fails
@@ -658,13 +660,15 @@ pub enum Instr {
         /// Whether input type is nullable
         #[walrus(skip_visit)]
         from_nullable: bool,
-        /// Input heap type
-        from_heap_type: HeapType,
+        /// Input heap type, boxed so this rare instruction does not set the
+        /// size of every `Instr`
+        from_heap_type: Box<HeapType>,
         /// Whether target type is nullable
         #[walrus(skip_visit)]
         to_nullable: bool,
-        /// Target heap type
-        to_heap_type: HeapType,
+        /// Target heap type, boxed so this rare instruction does not set the
+        /// size of every `Instr`
+        to_heap_type: Box<HeapType>,
     },
 
     /// `any.convert_extern` - convert externref to anyref
@@ -1070,8 +1074,11 @@ pub enum Value {
     F32(f32),
     /// A constant 64-bit float
     F64(f64),
-    /// A constant 128-bit vector register
-    V128(u128),
+    /// A constant 128-bit vector register: its sixteen bytes in the
+    /// little-endian order `v128.const` encodes them. Held as bytes, which
+    /// align to 1 where a `u128` aligns to 16, so a `Value` (and every `Instr`
+    /// holding one) is laid out at 8-byte alignment.
+    V128([u8; 16]),
 }
 
 impl fmt::Display for Value {
@@ -1081,7 +1088,7 @@ impl fmt::Display for Value {
             Value::I64(i) => i.fmt(f),
             Value::F32(i) => i.fmt(f),
             Value::F64(i) => i.fmt(f),
-            Value::V128(i) => i.fmt(f),
+            Value::V128(i) => u128::from_le_bytes(*i).fmt(f),
         }
     }
 }
