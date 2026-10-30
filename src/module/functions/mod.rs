@@ -1,7 +1,6 @@
 //! Functions within a wasm module.
 
 use std::cmp;
-use std::collections::BTreeMap;
 use std::ops::Range;
 
 use anyhow::{bail, Context};
@@ -588,16 +587,32 @@ fn used_local_functions<'a>(cx: &mut EmitContext<'a>) -> Vec<(FunctionId, &'a Lo
 }
 
 fn collect_non_default_code_offsets(
-    code_transform: &mut BTreeMap<InstrLocId, usize>,
+    code_transform: &mut Vec<(InstrLocId, usize)>,
     code_offset: usize,
     map: Vec<(InstrLocId, usize)>,
 ) {
-    for (src, dst) in map {
-        let dst = dst + code_offset;
-        if !src.is_default() {
-            code_transform.insert(src, dst);
+    code_transform.extend(
+        map.into_iter()
+            .filter(|(src, _)| !src.is_default())
+            .map(|(src, dst)| (src, dst + code_offset)),
+    );
+}
+
+/// The instruction map ordered by input offset, one entry per input offset:
+/// the last output offset recorded for it, in emission order.
+fn sorted_by_input_offset(mut map: Vec<(InstrLocId, usize)>) -> Vec<(InstrLocId, usize)> {
+    // A stable sort keeps the entries of one input offset in emission order;
+    // each later one overwrites the one kept before it.
+    map.sort_by_key(|(src, _)| *src);
+    map.dedup_by(|later, kept| {
+        if later.0 == kept.0 {
+            *kept = *later;
+            true
+        } else {
+            false
         }
-    }
+    });
+    map
 }
 
 impl Emit for ModuleFunctions {
@@ -609,7 +624,7 @@ impl Emit for ModuleFunctions {
         }
 
         let mut wasm_code_section = wasm_encoder::CodeSection::new();
-        let generate_map = cx.module.config.preserve_code_transform;
+        let generate_map = cx.module.records_code_transform();
 
         // Functions can typically take awhile to serialize, so serialize
         // everything in parallel. Afterwards we'll actually place all the
@@ -641,7 +656,7 @@ impl Emit for ModuleFunctions {
             })
             .collect::<Vec<_>>();
 
-        let mut instruction_map = BTreeMap::new();
+        let mut instruction_map = Vec::new();
         cx.indices.locals.reserve(bytes.len());
 
         let mut offset_data = Vec::new();
@@ -678,7 +693,7 @@ impl Emit for ModuleFunctions {
         cx.code_transform.function_ranges.sort_by_key(|i| i.0);
         // FIXME: code section start in DWARF debug information expects 2 bytes before actual code section start.
         cx.code_transform.code_section_start = code_section_start_offset - 2;
-        cx.code_transform.instruction_map = instruction_map.into_iter().collect();
+        cx.code_transform.instruction_map = sorted_by_input_offset(instruction_map);
     }
 }
 

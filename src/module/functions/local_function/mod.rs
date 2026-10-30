@@ -29,7 +29,11 @@ pub struct LocalFunction {
     /// Arguments to this function, and the locals that they're assigned to.
     pub args: Vec<LocalId>,
 
-    /// InstrSeqId list mapping to original instruction
+    /// Each instruction's offset in the original code section, mapped to its
+    /// `InstrLocId`, in offset order. Recorded at parse for a module whose
+    /// DWARF is rewritten (`ModuleConfig::generate_dwarf` on an input
+    /// carrying `.debug_*` sections), which is what reads it; empty
+    /// otherwise.
     pub instruction_mapping: Vec<(usize, InstrLocId)>,
 
     /// Original function binary range.
@@ -88,7 +92,8 @@ impl LocalFunction {
             "the function entry type should have already been created before parsing the body",
         );
         let entry = ctx.push_control_with_ty(BlockKind::FunctionEntry, ty);
-        let mut instruction_mapping = BTreeMap::new();
+        let mut instruction_mapping = Vec::new();
+        let record_mapping = module.rewrites_dwarf();
         ctx.func.builder.entry = Some(entry);
         let mut ops_reader = body.get_operators_reader()?;
         while !ops_reader.eof() {
@@ -101,9 +106,14 @@ impl LocalFunction {
             };
             validator.op(pos, &inst)?;
             append_instruction(&mut ctx, inst, loc);
-            instruction_mapping.insert(pos - code_address_offset, loc);
+            // The reader's positions only increase, so the mapping is built in
+            // offset order.
+            if record_mapping {
+                instruction_mapping.push((pos - code_address_offset, loc));
+            }
         }
-        ctx.func.instruction_mapping = instruction_mapping.into_iter().collect();
+        instruction_mapping.shrink_to_fit();
+        ctx.func.instruction_mapping = instruction_mapping;
         ops_reader.finish()?;
 
         debug_assert!(ctx.controls.is_empty());

@@ -91,10 +91,14 @@ impl ModuleConfig {
     /// By default this flag is `false`. Note that any emitted DWARF is
     /// currently wildly incorrect and buggy, and is also larger than the wasm
     /// itself!
+    ///
+    /// A module parsed with this flag that carries DWARF records what the
+    /// DWARF rewrite reads: each instruction's input offset at parse, and the
+    /// code transform at emit (as `preserve_code_transform` does). A module
+    /// carrying no `.debug_*` section has nothing to rewrite, and records
+    /// neither.
     pub fn generate_dwarf(&mut self, generate: bool) -> &mut ModuleConfig {
         self.generate_dwarf = generate;
-        // generate_dwarf implies preserve_code_transform
-        self.preserve_code_transform = generate || self.preserve_code_transform;
         self
     }
 
@@ -224,7 +228,9 @@ impl ModuleConfig {
 
     /// Sets a flag to whether code transform is preverved during parsing.
     ///
-    /// By default this flag is `false`.
+    /// By default this flag is `false`. With it set, every emit records the
+    /// code transform and hands it to each custom section's
+    /// `apply_code_transform`, whether or not the module carries DWARF.
     pub fn preserve_code_transform(&mut self, preserve: bool) -> &mut ModuleConfig {
         self.preserve_code_transform = preserve;
         self
